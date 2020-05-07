@@ -21,10 +21,18 @@ class ClientProtocol(asyncio.Protocol):
         if self.login is None:
             # login:User
             if decoded.startswith("login:"):
-                self.login = decoded.replace("login:", "").replace("\r\n", "")
-                self.transport.write(
-                    f"Привет, {self.login}!".encode()
-                )
+                login_received = decoded.replace("login:", "").strip()
+                if login_received in [client.login for client in self.server.clients]:
+                    self.transport.write(
+                        f"Логин {login_received} занят, попробуйте другой".encode()
+                    )
+                    self.transport.close()
+                else:
+                    self.login = login_received
+                    self.transport.write(
+                        f"Привет, {self.login}!".encode()
+                    )
+                    self.send_history()
         else:
             self.send_message(decoded)
 
@@ -32,9 +40,16 @@ class ClientProtocol(asyncio.Protocol):
         format_string = f"<{self.login}> {message}"
         encoded = format_string.encode()
 
+        self.server.history.append(format_string)
+
         for client in self.server.clients:
             if client.login != self.login:
                 client.transport.write(encoded)
+
+    def send_history(self):
+        self.transport.write(
+            "\n".join(self.server.history[-10:]).encode()
+        )
 
     def connection_made(self, transport: transports.Transport):
         self.transport = transport
@@ -48,9 +63,11 @@ class ClientProtocol(asyncio.Protocol):
 
 class Server:
     clients: list
+    history: list
 
     def __init__(self):
         self.clients = []
+        self.history = []
 
     def create_protocol(self):
         return ClientProtocol(self)
